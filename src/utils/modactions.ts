@@ -1,4 +1,4 @@
-import { GuildMember, MessageEmbedOptions, Permissions } from "discord.js";
+import { Guild, GuildMember, MessageEmbedOptions, Permissions, User } from "discord.js";
 import moment from "moment";
 import { UnbanAction, UnmuteAction, WarnConf, XClient } from "../gm";
 import { durationToString } from "./parsers";
@@ -322,7 +322,8 @@ export async function ban(client: XClient, target: GuildMember, time = 0, mod: G
         }
     }
 
-    registerBan(client, target);
+    await registerBan(client, target);
+
     return `\\✅ Banned \`${target.user.tag}\`${mendm}`;
 }
 
@@ -342,6 +343,47 @@ export async function registerBan(client: XClient, target: GuildMember): Promise
     }
     await client.database.updateUserData(pud);
     await client.database.updateGuildUserData(gud);
+}
+
+/**
+ * Unban a user from a guild
+ */
+export async function unban(client: XClient, guild: Guild, target: User, mod: GuildMember | string, summary?: string): Promise<void | string> {
+    if (!client.database || !client.user) return;
+    const modtag = mod instanceof GuildMember ? mod.user.tag : mod === client.user.id ? client.user.tag : isSnowflake(mod) ? guild.members.cache.get(mod)?.user.tag || "" : "";
+
+    let noNotify = false;
+    try {
+        const embed: MessageEmbedOptions = {
+            color: await client.database.getColor("success"),
+            title: `Unbab Notice`,
+            description: `You were **unbanned** from \`${guild.name}\`.    `,
+            fields: [
+                {
+                    name: "Reason",
+                    value: `${summary || "*none*"}`,
+                }
+            ],
+        };
+        if (modtag) {
+            embed.fields?.push({
+                name: "Moderator",
+                value: `${modtag}`,
+            });
+        }
+        await target.send({ embeds: [embed] });
+    } catch (error) {
+        noNotify = true;
+    }
+
+    try {
+        await guild.members.unban(target, summary);
+    } catch (e) {
+        return `\\🆘 Could not unban ${target.tag}`
+    }
+    
+    await Contraventions.logUnban(guild.id, target.id, mod, `${summary ? summary : ``}`, target.tag, noNotify ? true : false);
+    return `\\✅ Unbanned ${target.tag}`;
 }
 
 /**

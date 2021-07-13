@@ -1,9 +1,9 @@
 import { permLevels } from '../../permissions';
-import { Command, GuildMessageProps } from "src/gm";
-import { Contraventions } from "../../utils/contraventions";
+import { Command } from "src/gm";
 import { isSnowflake } from '../../utils/specials';
+import { unban } from '../../utils/modactions';
 
-export const command: Command<GuildMessageProps> = {
+export const command: Command = {
     name: "unban",
     aliases: ["ub"],
     description: {
@@ -42,7 +42,8 @@ export const command: Command<GuildMessageProps> = {
                 const ba = b.array();
                 for (let i = 0; i < ba.length; i++) {
                     const c = ba[i];
-                    await message.guild.members.unban(c.user);
+                    // await message.guild.members.unban(c.user);
+                    await unban(client, message.guild, c.user, message.member, `UNBAN ALL action requested by ${message.author.tag}`);
                     bc++;
                 }
                 await message.channel.send(`\\✅ ${bc} users unbanned`);
@@ -75,15 +76,18 @@ export const command: Command<GuildMessageProps> = {
                 return;
             }
 
-            args.shift();
-            const reason = a;
+            args.shift();// shift the target argument
+            const reason = args.join(" ");
             try {
-                await message.guild.members.unban(ub.user, reason);
-                Contraventions.logUnban(message.guild.id, ub.user.id, message.member, reason, ub.user.tag);
-                await message.channel.send(`\\✅ Unbanned ${ub.user.tag}`).catch(xlg.error);
+                const unbanResult = await unban(client, message.guild, ub.user, message.member, reason);
+                if (unbanResult) {
+                    await message.channel.send(unbanResult);
+                    return;
+                }
             } catch (e) {
-                await message.channel.send(`\\🆘 Could not unban ${ub.user.tag}`);
+                //
             }
+            await message.channel.send(`\\🆘 Could not unban ${ub.user.tag}`);
         } catch (error) {
             xlg.error(error);
             await client.specials.sendError(message.channel);

@@ -365,41 +365,32 @@ client.on("messageReactionRemove", async (reaction, user) => {
 // the actual command processing
 client.on("message", async (message: XMessage) => {// This event will run on every single message received, from any channel or DM.
     try {
-        // if (message.partial) {
-        //     message = await <Promise<XMessage>>message.fetch();
-        // }
+        client.services.runAllForEvent("message", message), client.database.logMsgReceive();// log reception of message event | run all passive command services
 
-        client.database.logMsgReceive();// log reception of message event
-        client.services.runAllForEvent("message", message);// run all passive command services
-
-        if (message.author.bot || message.system || message.webhookID) return;
-        if (!client.user) return;
-
-        // let dm = false; // checks if it's from a dm
-        // if (!(message.channel instanceof GuildChannel))
-        //     dm = true;
+        if (message.author.bot || message.system || message.webhookID || !client.user) return;
 
         const now = Date.now();
 
-        let special_prefix;
+        message.gprefix = "";
         if (message.channel instanceof GuildChannel) {
-            const gsr = await client.database.getGlobalSetting('global_prefix');
-            if (gsr) {
-                special_prefix = gsr.value;
-                message.bprefix = gsr.value;
-            }
-            const gpr = await client.database.getPrefix(message.channel.guild.id);
-            if (gpr) {
-                special_prefix = gpr;
+            // const gsr = await client.database.getGlobalSetting('global_prefix');
+            // if (gsr) {
+            //     special_prefix = gsr.value;
+            //     message.bprefix = gsr.value;
+            // }
+            const prefixes = await client.database.getPrefixes(message.channel.guild.id);// this takes too long (120ms+)
+            if (prefixes) {
+                const { gprefix, nprefix } = prefixes;
+                message.bprefix = nprefix;
+                message.gprefix = gprefix;
             }
         } else {
             const gsr = await client.database.getGlobalSetting('global_prefix');
             if (gsr) {
-                special_prefix = gsr.value;
                 message.bprefix = gsr.value;
+                message.gprefix = gsr.value;
             }
         }
-        message.gprefix = special_prefix || "";
 
         const ct = combineMessageText(message);// all of the text in the message put together (no delimeter, raw text);
 
@@ -437,12 +428,12 @@ client.on("message", async (message: XMessage) => {// This event will run on eve
 
         let args = ct.slice(prefixUsed.length).trim().split(/ +/g);
         const commandName = args.shift()?.toLowerCase() || "";
-
+        
         const command = client.commands.get(commandName || "")
-            || client.commands.find(cmd => !!(cmd.aliases && cmd.aliases.includes(commandName)));
-
+        || client.commands.find(cmd => !!(cmd.aliases && cmd.aliases.includes(commandName)));
+        
         if (!command || !command.name) return; //Stops processing if command doesn't exist, this isn't earlier because there are exceptions
-        const cc = message.guild ? await client.database.getCommands(message.guild.id, undefined, false) : false;
+        const cc = message.guild ? await client.database.getCommands(message.guild.id, undefined, false) : false;// this fetches from the db // this takes too much time
         const cs = cc && message.guild ? await client.database.getCommand(message.guild.id, command.name, cc) : false;
         const gc = cc && message.guild ? cc.conf : false;
         const disabled = cs ? !!(!cs.enabled || (!cs.channel_mode && cs.channels.includes(message.channel.id)) || (cs.channel_mode && !cs.channels.includes(message.channel.id)) || (message.member && ((cs.role_mode && !message.member.roles.cache.find(x => cs.roles.includes(x.id))) || (!cs.role_mode && message.member.roles.cache.find(x => cs.roles.includes(x.id)))))) : false;
@@ -514,7 +505,7 @@ client.on("message", async (message: XMessage) => {// This event will run on eve
         }
 
         const timestamps = cooldowns.get(command.name);
-        const cd = (cs ? typeof cs.cooldown === "number" ? cs.cooldown : command.cooldown || 0 : command.cooldown || 0) * 1000;
+        const cd = (cs ? typeof cs.cooldown === "number" ? cs.cooldown : command.cooldown ?? 0 : command.cooldown || 0) * 1000;
 
         if (timestamps) {
             if (timestamps.has(message.author.id)) {
@@ -524,7 +515,7 @@ client.on("message", async (message: XMessage) => {// This event will run on eve
 
                     if (now < expirationTime) {
                         const timeLeft = (expirationTime - now) / 1000;
-                        message.reply(`please wait ${timeLeft.toFixed(1)} more second(s) before reusing the \`${command.name}\` command.`)
+                        await message.reply(`please wait ${timeLeft.toFixed(1)} more second(s) before reusing the \`${command.name}\` command.`)
                         return;
                     }
                 }
@@ -554,46 +545,6 @@ client.on("message", async (message: XMessage) => {// This event will run on eve
                 }
                 return;
             }
-        }
-
-        if (command.args && (typeof command.args === "boolean" || command.args > 0) && (!args.length || (typeof command.args === "number" && (args.length < command.args || args.length > command.args)))) {// if arguments are required but not provided, SHOULD ADD SPECIFIC ARGUMENT COUNT PROPERTY
-            const fec_gs = await client.database.getColor("fail");
-
-            let reply = command.args === true ? `Arguments are needed to make that work!` : `\`${args.length < command.args ? command.args - args.length : args.length - command.args}\` ${args.length < command.args ? `more` : `less`} argument${(args.length < command.args ? command.args - args.length : args.length - command.args) > 1 ? `s` : ``} required for this command`;
-            if (command.usage) {
-                reply += `\n**Usage:**\n\`${message.gprefix}${command.name} ${command.usage}\``;
-            }
-            if (command.examples && command.examples.length) {
-                reply += `\n**Example${command.examples.length > 1 ? "s" : ""}:**`;
-                for (const example of command.examples) {
-                    reply += `\n\`${message.gprefix} ${command.aliases && command.aliases.length ? command.aliases[0] : command.name} ${example}\``;
-                }
-            }
-
-            await message.channel.send({
-                embeds: [{
-                    description: reply,
-                    color: fec_gs,
-                    footer: {
-                        text: ['tip: separate arguments with spaces', 'tip: [] means optional, <> means required\nreplace these with your arguments'][Math.floor(Math.random() * 2)]
-                    }
-                }],
-            });
-            return;
-        } else if (typeof command.args === "number" && args.length !== command.args) {
-            let reply: string;
-            // because of the above condition block, if the command args property isn't 0, it should already be handled above
-            if (command.args === 0) {// therefore, this will always be true
-                reply = "**No arguments** are allowed for this command.";
-            } else {
-                reply = `Incorrect arguments. Please provide ${command.args} arguments.`;
-            }
-            if (command.usage) {
-                reply += `\n**Usage:**\n\`${message.gprefix}${command.name} ${command.usage}\``;
-            }
-
-            await client.specials.sendError(message.channel, reply)
-            return;
         }
 
         const flags = parseLongArgs(args);// get the flags from the beginning of the message, if they are provided
@@ -653,6 +604,46 @@ client.on("message", async (message: XMessage) => {// This event will run on eve
             } else {
                 args.unshift("--help");
             }
+        }
+
+        if (command.args && (typeof command.args === "boolean" || command.args > 0) && (!args.length || (typeof command.args === "number" && (args.length < command.args || args.length > command.args)))) {// if arguments are required but not provided, SHOULD ADD SPECIFIC ARGUMENT COUNT PROPERTY
+            const fec_gs = await client.database.getColor("fail");
+
+            let reply = command.args === true ? `Arguments are needed to make that work!` : `\`${args.length < command.args ? command.args - args.length : args.length - command.args}\` ${args.length < command.args ? `more` : `less`} argument${(args.length < command.args ? command.args - args.length : args.length - command.args) > 1 ? `s` : ``} required for this command`;
+            if (command.usage) {
+                reply += `\n**Usage:**\n\`${message.gprefix}${command.name} ${command.usage}\``;
+            }
+            if (command.examples && command.examples.length) {
+                reply += `\n**Example${command.examples.length > 1 ? "s" : ""}:**`;
+                for (const example of command.examples) {
+                    reply += `\n\`${message.gprefix} ${command.aliases && command.aliases.length ? command.aliases[0] : command.name} ${example}\``;
+                }
+            }
+
+            await message.channel.send({
+                embeds: [{
+                    description: reply,
+                    color: fec_gs,
+                    footer: {
+                        text: ['tip: separate arguments with spaces', 'tip: [] means optional, <> means required\nreplace these with your arguments'][Math.floor(Math.random() * 2)]
+                    }
+                }],
+            });
+            return;
+        } else if (typeof command.args === "number" && args.length !== command.args) {
+            let reply: string;
+            // because of the above condition block, if the command args property isn't 0, it should already be handled above
+            if (command.args === 0) {// therefore, this will always be true
+                reply = "**No arguments** are allowed for this command.";
+            } else {
+                reply = `Incorrect arguments. Please provide ${command.args} arguments.`;
+            }
+            if (command.usage) {
+                reply += `\n**Usage:**\n\`${message.gprefix}${command.name} ${command.usage}\``;
+            }
+
+            await client.specials.sendError(message.channel, reply)
+            return;
         }
 
         try {

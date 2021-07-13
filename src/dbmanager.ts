@@ -61,15 +61,22 @@ export class DBManager {
     public db!: mysql.Connection;
     private query!: (arg1: string | mysql.QueryOptions) => Promise<unknown>;
     public connected: boolean;
+    private ping!: (arg1: mysql.QueryOptions | undefined) => Promise<void>;
 
     constructor() {
-        this.db;
-        this.query;
+        // this.db;
+        // this.query;
         this.connected = false;
     }
 
     async handleDisconnect(): Promise<this> {
         try {
+            this.connected = false;
+            if (this.db) {
+                this.db.end((err) => {
+                    xlg.error("MYSQL CONNECTION CLOSE ERROR:", err);
+                });
+            }
             const conn: mysql.Connection = mysql.createConnection(db_config);
             conn.connect((err) => {
                 if (err) {
@@ -94,6 +101,7 @@ export class DBManager {
 
             this.db = conn;
             this.query = util.promisify(conn.query).bind(conn);
+            this.ping = util.promisify<mysql.QueryOptions | undefined>(conn.ping).bind(this.db);
             // util.promisify(conn.query).bind(conn)
             /*(query_str, query_var => {
                 return new Promise((resolve, reject) => {
@@ -126,6 +134,18 @@ export class DBManager {
             xlg.error(`DB Error: ${error.message}\nError: ${error.stack}`);
             return this;
         }
+    }
+
+    /**
+     * Get a round trip ping (I assume it is accurate)
+     * 
+     * Returns a tuple [~seconds, =nanoseconds]
+     */
+    async getPing(): Promise<[number, number]> {
+        const pingStart = process.hrtime();
+        await this.ping(undefined);
+        const pingResolution = process.hrtime(pingStart);
+        return pingResolution;
     }
 
     /*escapeString(str: string) {
@@ -488,10 +508,21 @@ export class DBManager {
      * Get the prefix for a guild if it has one, otherwise it will be the default prefix stored in GlobalSettings
      * @param guildid Guild ID
      */
-    async getPrefix(guildid = ""): Promise<string | false> {
-        const rows = await <Promise<{ guildid: string, prefix: string }[]>>this.query(`SELECT \`prefix\` FROM \`prefix\` WHERE \`guildid\` = '${guildid}'`).catch(xlg.error);
+    async getPrefixes(guildid: string): Promise<{ gprefix: string, nprefix: string } | false> {
+        const rows = await <Promise<{ value: string }[]>>this.query(`SELECT value FROM globalsettings WHERE name = 'global_prefix' ` +
+            `UNION ALL SELECT prefix FROM prefix WHERE guildid = ${escape(guildid)}`);
+        // SELECT value FROM globalsettings WHERE name = 'global_prefix' UNION ALL SELECT prefix FROM prefix WHERE guildid = '660242946834038785'
+        // { guildid: string, prefix: string }[]
         if (rows.length > 0) {
-            return rows[0].prefix;
+            const prefixes = { gprefix: "", nprefix: "" };
+            if (rows[0]) {
+                prefixes.nprefix = rows[0].value;
+                prefixes.gprefix = rows[0].value;
+            }
+            if (rows[1]) {
+                prefixes.gprefix = rows[1].value;
+            }
+            return prefixes;
         } else {
             return false;
         }
@@ -546,7 +577,7 @@ export class DBManager {
         try {
             if (!guild) return false;
             const gid = guild instanceof Guild ? guild.id : guild;
-            const rows = await <Promise<GuildSettingsRow[]>>this.query(`SELECT * FROM guildsettings WHERE guildid = '${gid}' AND property = '${name}'`).catch(xlg.error);
+            const rows = await <Promise<GuildSettingsRow[]>>this.query(`SELECT * FROM guildsettings WHERE guildid = '${gid}' AND property = '${name}'`);
             if (rows.length > 0) {
                 return rows[0];
             } else {
@@ -1591,11 +1622,11 @@ export class DBManager {
      */
     async getCommandConf(guildid: string): Promise<CmdConfEntry | false> {
         try {
-            const ccd = await this.getGuildSetting(guildid, 'commandconf');
+            const ccd = await this.getGuildSetting(guildid, 'commandconf');//TODO: this takes at minimum 200ms to resolve, fix that
             let tp = "";
             if (!ccd || !ccd.value) {
                 if (ccd && !ccd.value) {
-                    this.editGuildSetting(guildid, "commandconf", undefined, true);
+                    await this.editGuildSetting(guildid, "commandconf", undefined, true);
                 }
                 tp = `{"commands": [], "conf": {}}`;
             } else {
@@ -1607,7 +1638,7 @@ export class DBManager {
                 return 'commands' in o && 'conf' in o;
             }
             if (!isCmdConf(cc)) {
-                this.editGuildSetting(guildid, "commandconf", undefined, true);
+                await this.editGuildSetting(guildid, "commandconf", undefined, true);
                 return false;
             }
             return cc;
@@ -1688,7 +1719,7 @@ export class DBManager {
             return cc;
         } catch (error) {
             xlg.error(error)
-            this.editGuildSetting(guildid, "commandconf", undefined, true);
+            await this.editGuildSetting(guildid, "commandconf", undefined, true);
             return false;
         }
     }

@@ -135,13 +135,13 @@ export default function routerBuild (client: XClient): express.Router {
             }
             const g = await client.guilds.fetch(id);
             if (!g) return res.sendStatus(404);
-            const r = await Bot.client.database.getPrefix(id);
-            let prefix = r ? r : false;
-            if (!prefix) {
-                const r = await client.database.getGlobalSetting('global_prefix');
-                prefix = r ? r.value : "sm";
-            }
-            if (!prefix) {
+            const prefixesResult = await Bot.client.database.getPrefixes(id);
+            const prefix = prefixesResult ? prefixesResult.gprefix || prefixesResult.nprefix : false;
+            // if (!prefix) {
+            //     const r = await client.database.getGlobalSetting('global_prefix');
+            //     prefix = r ? r.value : "sm";
+            // }
+            if (!prefix || !prefixesResult) {
                 return res.status(500).send({ msg: "Unable to retrieve prefix" });
             }
             const modAllRes = await client.database.getGuildSetting(id, 'all_moderation');

@@ -1,4 +1,3 @@
-
 import { permLevels } from '../../permissions';
 import { stringToMember } from "../../utils/parsers";
 import Discord from 'discord.js';
@@ -21,8 +20,6 @@ export const command: Command = {
     permissions: ["BAN_MEMBERS"],
     async execute(client, message, args) {
         try {
-            if (!message.guild || !message.member) return;
-
             const target = await stringToMember(message.guild, args[0], false, false, false);
             if (!target || !(target instanceof Discord.GuildMember)) {
                 if (/^[0-9]{18}$/g.test(args[0])) {
@@ -41,7 +38,7 @@ export const command: Command = {
                 return;
             }
             if (target.id === client.user?.id) {
-                message.channel.send("What if I said I won't let you ban me?");
+                await message.channel.send("What if I said I won't let you ban me?");
                 return;
             }
             if (!target.bannable) {
@@ -49,13 +46,13 @@ export const command: Command = {
                 return;
             }
             if (target.id === message.author.id) {
-                message.channel.send('You cannot ban yourself');
+                await message.channel.send('You cannot ban yourself');
                 return;
             }
             const dbmr = await client.database.getGuildSetting(message.guild, "mutedrole");
             const mutedRoleID = dbmr ? dbmr.value : "";
             if ((target.roles.cache.filter(r => r.id !== mutedRoleID).sort((a, b) => a.position - b.position).first()?.position || 0) >= message.member.roles.highest.position && message.guild.ownerID !== message.member.id) {
-                message.channel.send('You cannot ban a member that is equal to or higher than yourself');
+                await message.channel.send('You cannot ban a member that is equal to or higher than yourself');
                 return;
             }
             args.shift();
@@ -72,13 +69,13 @@ export const command: Command = {
             try {
                 const banResult = await ban(client, target, time, message.member, reason);
                 if (banResult) {
-                    message.channel.send(banResult);
+                    await message.channel.send(banResult);
                     return;
                 }
             } catch (e) {
                 //
             }
-            message.channel.send(`\\🆘 Could not ban ${target.user.tag}`);
+            await message.channel.send(`\\🆘 Could not ban ${target.user.tag}`);
         } catch (error) {
             xlg.error(error);
             await client.specials.sendError(message.channel);
@@ -86,4 +83,3 @@ export const command: Command = {
         }
     }
 }
-
